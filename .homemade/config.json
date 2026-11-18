@@ -1,0 +1,82 @@
+{
+  "$schema": "https://homemade.dev/schemas/latest/config.json",
+  "size": "medium",
+  "setup": [
+    "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates postgresql-client",
+    "curl -fsSL https://github.com/Y2Z/monolith/releases/download/v2.11.7/monolith-cli-linux-x86_64 -o /usr/local/bin/monolith && chmod 755 /usr/local/bin/monolith"
+  ],
+  "warmup": [
+    "getent hosts meilisearch >/dev/null || printf '127.0.0.1 meilisearch\\n' | sudo tee -a /etc/hosts >/dev/null",
+    "mkdir -p \"$TMPDIR\" && npx --yes corepack yarn install --immutable --mode=skip-build",
+    "npx --yes corepack yarn exec patch-package",
+    "npx --yes corepack yarn prisma:generate",
+    "npx24 --yes corepack yarn workspace @linkwarden/web exec playwright install --only-shell chromium"
+  ],
+  "install": [
+    "getent hosts meilisearch >/dev/null || printf '127.0.0.1 meilisearch\\n' | sudo tee -a /etc/hosts >/dev/null",
+    "mkdir -p \"$TMPDIR\" && npx --yes corepack yarn install --immutable --mode=skip-build",
+    "npx --yes corepack yarn exec patch-package",
+    "npx --yes corepack yarn prisma:generate",
+    "npx24 --yes corepack yarn workspace @linkwarden/web exec playwright install --only-shell chromium"
+  ],
+  "services": {
+    "db": {
+      "cmd": "docker start -a linkwarden-db || exec docker run --name linkwarden-db -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB -e POSTGRES_HOST_AUTH_METHOD -v linkwarden-pgdata:/var/lib/postgresql/data -p 127.0.0.1:5432:5432 postgres:16-alpine",
+      "port": 5432,
+      "displayName": "PostgreSQL",
+      "order": 2
+    },
+    "search": {
+      "cmd": "docker start -a linkwarden-search || exec docker run --name linkwarden-search -e MEILI_MASTER_KEY -e MEILI_ENV -v linkwarden-meilidata:/meili_data -p 7700:7700 getmeili/meilisearch:v1.13.3",
+      "port": 7700,
+      "healthcheck": {
+        "path": "/health"
+      },
+      "displayName": "Meilisearch",
+      "order": 3
+    },
+    "web": {
+      "cmd": "timeout 120 sh -c 'until pg_isready -h 127.0.0.1 -p 5432 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -q; do sleep 1; done' && npx --yes corepack yarn prisma:deploy && exec npx --yes corepack yarn workspace @linkwarden/web dev -H 0.0.0.0 -p \"$PORT\"",
+      "port": 3000,
+      "url": true,
+      "healthcheck": {
+        "path": "/"
+      },
+      "displayName": "Linkwarden",
+      "order": 0
+    },
+    "worker": {
+      "cmd": "timeout 180 sh -c 'until curl -fsS http://127.0.0.1:3000/api/v1/config >/dev/null && curl -fsS http://127.0.0.1:7700/health >/dev/null; do sleep 1; done' && exec npx --yes corepack yarn worker:dev",
+      "displayName": "Preservation worker",
+      "order": 1
+    }
+  },
+  "env_schema": [
+    {
+      "key": "TMPDIR",
+      "warmup": true
+    },
+    {
+      "key": "YARN_ENABLE_SCRIPTS",
+      "warmup": true
+    },
+    {
+      "key": "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE",
+      "warmup": true
+    },
+    {
+      "key": "PLAYWRIGHT_BROWSERS_PATH",
+      "warmup": true
+    },
+    "DATABASE_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    "POSTGRES_HOST_AUTH_METHOD",
+    "NEXTAUTH_URL",
+    "NEXTAUTH_SECRET",
+    "MEILI_HOST",
+    "MEILI_MASTER_KEY",
+    "MEILI_ENV"
+  ]
+}
